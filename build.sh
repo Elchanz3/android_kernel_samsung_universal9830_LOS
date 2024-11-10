@@ -3,90 +3,15 @@
 # Load configuration file
 source "$(pwd)/config.sh"
 
-# File name where the API key should be located
-API_KEY_FILE="$(pwd)/openai_api_key.txt"
-
-# Logging function for easier tracking of script progress and errors
-log() {
-    local message="$1"
-    echo "$message"
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $message" >> "$LOG_FILE"
-}
-
-# Function to load the GPT API key if the file exists
-load_api_key() {
-    if [ -f "$API_KEY_FILE" ]; then
-        api_key=$(<"$API_KEY_FILE")
-        log "OpenAI API key loaded from $API_KEY_FILE."
-    else
-        log "No OpenAI API key file found. GPT error explanations will be disabled."
-        api_key=""
-    fi
-}
-
-# Function to query the GPT API for error explanations, if the key exists
-explain_error() {
-    local error_message="$1"
-    
-    # Check if the API key is loaded
-    if [ -z "$api_key" ]; then
-        log "API key not found. Skipping GPT error explanation."
-        return
-    fi
-
-    # Make the GPT API request to get the error explanation
-    response=$(curl -s -X POST "https://api.openai.com/v1/completions" \
-        -H "Content-Type: application/json" \
-        -H "Authorization: Bearer $api_key" \
-        -d '{
-            "model": "text-davinci-003",
-            "prompt": "Explain this Linux shell error: '"$error_message"'",
-            "max_tokens": 50,
-            "temperature": 0.5
-        }')
-    
-    # Extract the explanation from the API response and display it
-    explanation=$(echo "$response" | jq -r '.choices[0].text')
-    echo -e "\nGPT Explanation:\n$explanation"
-    log "GPT Explanation for error '$error_message': $explanation"
-}
-
-# Function to handle errors and request explanation, if available
-handle_error() {
-    local error_message="$1"
-    log "Error encountered: $error_message"
-    explain_error "$error_message"
-}
-
-# Function to check if required tools and directories are available
-check_requirements() {
-    local tools=("make" "zip" "mkdtimg")
-    local dirs=("$AK3_PATH" "$CDIR/toolchain" "$CDIR/AIK")
-
-    for tool in "${tools[@]}"; do
-        if ! command -v "$tool" &> /dev/null; then
-            handle_error "Required tool '$tool' not found."
-            exit 1
-        fi
-    done
-
-    for dir in "${dirs[@]}"; do
-        if [ ! -d "$dir" ]; then
-            handle_error "Required directory '$dir' not found."
-            exit 1
-        fi
-    done
-    log "All required tools and directories are available."
-}
-
 # Function to validate the device codename
 validate_codename() {
     while true; do
         echo "Enter the device codename (${VALID_CODENAMES[*]}):"
         read -r DEVICE_CODENAME
 
+        # Check if the codename is in the list of valid codenames
         if [[ " ${VALID_CODENAMES[*]} " =~ " ${DEVICE_CODENAME} " ]]; then
-            log "Codename '${DEVICE_CODENAME}' validated."
+            echo "Codename '${DEVICE_CODENAME}' validated."
             break
         else
             echo "Invalid codename. Please try again."
@@ -94,101 +19,107 @@ validate_codename() {
     done
 }
 
-# Function to confirm if the user wants to proceed with the compilation
+# Function to confirm whether the user wants to proceed with the compilation
 confirm_compile() {
     while true; do
         echo "Do you want to proceed with the compilation? (y/n):"
         read -r CONFIRMATION
         case "$CONFIRMATION" in
-            [Yy]* ) log "User confirmed to proceed with compilation."; break ;;
-            [Nn]* ) log "User canceled the compilation."; echo "Compilation canceled."; exit 0 ;;
+            [Yy]* ) echo "$(date): User confirmed to proceed with compilation." >> "$LOG_FILE"; break ;; # Log confirmation
+            [Nn]* ) echo "$(date): User canceled the compilation." >> "$LOG_FILE"; echo "Compilation canceled."; exit 0 ;; # Log cancellation
             * ) echo "Invalid response. Enter 'y' to continue or 'n' to cancel." ;;
         esac
     done
 }
 
-# Function to create the required directories
-create_directories() {
-    mkdir -p "$OUT_DIR" images builds || { handle_error "Error creating directories."; exit 1; }
-    export CDIR="$(pwd)"
-    log "Directories created."
-}
-
-# Function to clean up temporary directories and files
-cleanup() {
-    log "Starting cleanup..."
-    rm -rf "$OUT_DIR" images
-    log "Temporary files cleaned up."
-}
-
-# Function to measure and display the total execution time
-measure_time() {
-    local start_time="$1"
-    local end_time=$(date +"%s")
-    local diff=$((end_time - start_time))
-    log "Total time: $((diff / 60)) minute(s) and $((diff % 60)) seconds."
-}
-
-# Main kernel compilation function
-compile_kernel() {
-    DEFCONFIG_NAME="exynos9830-${DEVICE_CODENAME}_defconfig"
-    make O="$OUT_DIR" "$DEFCONFIG_NAME" || { handle_error "Kernel compilation failed at defconfig stage."; exit 1; }
-    make O="$OUT_DIR" -j12 2>&1 | tee -a "$LOG_FILE" || { handle_error "Kernel compilation failed at make stage."; exit 1; }
-
-    if [ ! -f "$OUT_DIR/arch/arm64/boot/Image" ]; then
-        handle_error "Compilation failed. Kernel image not found."
-        exit 1
-    else
-        log "Kernel compiled successfully."
-    fi
-}
-
-# Function to generate the AnyKernel3 package
-generate_anykernel_zip() {
-    log "Generating AnyKernel3 zip..."
-    rm -f "$AK3_PATH"/*.zip
-    (cd "$AK3_PATH" && zip -r9 "$KERNELZIP" .) || { handle_error "Error creating AnyKernel package."; exit 1; }
-    mv "$AK3_PATH/$KERNELZIP" "$CDIR/builds/${IMAGE_NAME}${KERNELVERSION}.zip"
-    log "AnyKernel3 zip generated."
-}
-
-# Function to generate the flashable image
-generate_flashable_image() {
-    log "Generating flashable image..."
-    cd "$CDIR/AIK"
-    ./cleanup.sh
-    ./unpackimg.sh --nosudo
-
-    mv "$AK3_PATH/dtb.img" "$CDIR/images/boot.img-dtb"
-    mv "$OUT_DIR/arch/arm64/boot/Image" "$CDIR/images/boot.img-kernel"
-
-    rm -f "$CDIR/AIK/split_img/boot.img-kernel" "$CDIR/AIK/split_img/boot.img-dtb"
-    mv "$CDIR/images/boot.img-kernel" "$CDIR/AIK/split_img/"
-    mv "$CDIR/images/boot.img-dtb" "$CDIR/AIK/split_img/"
-    ./repackimg.sh --nosudo
-
-    mv "$CDIR/AIK/image-new.img" "$CDIR/builds/${IMAGE_NAME}.img"
-    log "Flashable image generated."
-}
-
-# Load the API key before starting the process
-load_api_key
-
-# Execution starts here
-DATE_START=$(date +"%s")
-
-log "Starting build process..."
-check_requirements
+# Run codename validation and confirmation before starting the compilation
 validate_codename
 confirm_compile
-create_directories
 
-compile_kernel
-generate_anykernel_zip
-generate_flashable_image
+# Define the defconfig name based on the codename
+DEFCONFIG_NAME="exynos9830-${DEVICE_CODENAME}_defconfig"
+SEC_CONFIG="smartaxx_defconfig"
 
-cleanup
-measure_time "$DATE_START"
+# Create necessary directories with -p to avoid errors if they already exist
+mkdir -p "$OUT_DIR" images builds
+export CDIR="$(pwd)"
 
-log "Build process completed. Find your zip and image in the 'builds' directory."
+DATE_START=$(date +"%s")
 
+# Compile the kernel using the generated defconfig name
+make O="$OUT_DIR" "$SEC_CONFIG" "$DEFCONFIG_NAME"
+make O="$OUT_DIR" -j12 2>&1 | tee "$LOG_FILE"
+
+# Generate device tree blobs
+cd "$CDIR/toolchain"
+./mkdtimg cfg_create "$AK3_PATH/dtb.img" "$CDIR/dtconfigs/exynos9830.cfg" -d "$OUT_DIR/arch/arm64/boot/dts/exynos"
+./mkdtimg cfg_create "$AK3_PATH/dtbo.img" "$CDIR/dtconfigs/c1s.cfg" -d "$OUT_DIR/arch/arm64/boot/dts/samsung"
+
+# Copy the kernel image
+cp "$OUT_DIR/arch/arm64/boot/Image" "$AK3_PATH/Image"
+export IMAGE="$AK3_PATH/Image"
+
+echo "******************************************"
+echo "Checking required files..."
+echo "******************************************"
+
+# Check if the compiled image exists
+if [ ! -f "$IMAGE" ]; then
+    echo "Compilation failed. File '$IMAGE' not found. Check logs."
+    exit 1
+else
+    echo "File '$IMAGE' found. Proceeding to the next step."
+fi
+
+echo "******************************************"
+echo "Generating AnyKernel3 zip..."
+echo "******************************************"
+
+# Remove old zip files and create a new kernel package
+rm -f "$AK3_PATH"/*.zip
+(cd "$AK3_PATH" && zip -r9 "$KERNELZIP" .) || { echo "Error creating AnyKernel package"; exit 1; }
+mv "$AK3_PATH/$KERNELZIP" "$CDIR/builds/${IMAGE_NAME}${KERNELVERSION}.zip"
+echo "Zip completed..."
+
+echo "******************************************"
+echo "Generating flashable image..."
+echo "******************************************"
+
+# Clean up and repack the image
+cd "$CDIR/AIK"
+./cleanup.sh
+./unpackimg.sh --nosudo
+
+# Move generated files to a temporary directory
+mv "$AK3_PATH/dtb.img" "$CDIR/images/boot.img-dtb"
+mv "$IMAGE" "$CDIR/images/boot.img-kernel"
+
+# Update AIK with the new kernel and dtb images
+rm -f "$CDIR/AIK/split_img/boot.img-kernel" "$CDIR/AIK/split_img/boot.img-dtb"
+mv "$CDIR/images/boot.img-kernel" "$CDIR/AIK/split_img/"
+mv "$CDIR/images/boot.img-dtb" "$CDIR/AIK/split_img/"
+
+# Repack the boot image without sudo
+rm -rf "$CDIR/images"
+cd "$CDIR/AIK"
+./repackimg.sh --nosudo
+
+# Move the repacked image to the builds directory
+cd "$CDIR"
+mv "$CDIR/AIK/image-new.img" "$CDIR/builds/${IMAGE_NAME}.img"
+
+# Remove the kout directory after build
+if [ -d "$OUT_DIR" ]; then
+    rm -rf "$OUT_DIR"
+    echo "Directory 'kout' removed."
+else
+    echo "No 'kout' directory found."
+fi
+
+echo "Image generation completed."
+
+DATE_END=$(date +"%s")
+DIFF=$((DATE_END - DATE_START))
+
+echo -e "\nTotal time: $((DIFF / 60)) minute(s) and $((DIFF % 60)) seconds.\n"
+echo "Find your zip and image in the 'builds' directory."
