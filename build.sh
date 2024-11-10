@@ -38,6 +38,7 @@ confirm_compile
 
 # Define the defconfig name based on the codename
 DEFCONFIG_NAME="exynos9830-${DEVICE_CODENAME}_defconfig"
+SEC_CONFIG="smartaxx_defconfig"
 
 # Create necessary directories with -p to avoid errors if they already exist
 mkdir -p "$OUT_DIR" images builds
@@ -46,7 +47,7 @@ export CDIR="$(pwd)"
 DATE_START=$(date +"%s")
 
 # Compile the kernel using the generated defconfig name
-make O="$OUT_DIR" "$DEFCONFIG_NAME"
+make O="$OUT_DIR" "$SEC_CONFIG" "$DEFCONFIG_NAME"
 make O="$OUT_DIR" -j12 2>&1 | tee "$LOG_FILE"
 
 # Generate device tree blobs
