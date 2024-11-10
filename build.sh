@@ -60,7 +60,7 @@ handle_error() {
 
 # Function to check if required tools and directories are available
 check_requirements() {
-    local tools=("make" "zip" "mkdtimg")
+    local tools=("make" "zip")
     local dirs=("$AK3_PATH" "$CDIR/toolchain" "$CDIR/AIK")
 
     for tool in "${tools[@]}"; do
