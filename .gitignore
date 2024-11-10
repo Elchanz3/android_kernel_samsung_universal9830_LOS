@@ -138,3 +138,4 @@ all.config
 /builds
 *.log
 /kout
+openai_api_key.txt
