@@ -640,7 +640,8 @@ static struct device_attribute *mag_attrs[] = {
 int initialize_magnetic_sensor(struct ssp_data *data)
 {
 	int ret, i;
-/*
+
+	/*
 	if (data->mag_type == MAG_TYPE_AKM) {
 		ret = get_fuserom_data(data);
 		if (ret < 0)
@@ -657,10 +658,12 @@ int initialize_magnetic_sensor(struct ssp_data *data)
 			pr_err("[SSP]: %s - set_magnetic_static_matrix failed %d\n",
 				__func__, ret);
 	}
-*/
+	*/
 
-    for(i = 0;  i < mag_manager.size; i++)
+    // Using braces to avoid misleading indentation warnings
+    for (i = 0; i < mag_manager.size; i++) {
         ((mag *)mag_manager.item[i])->initialize(data);
+    }
     
 	ret = set_magnetic_cal_param_to_ssp(data);
 	if (ret < 0)
@@ -668,6 +671,7 @@ int initialize_magnetic_sensor(struct ssp_data *data)
 
 	return ret < 0 ? ret : SUCCESS;
 }
+
 
 void initialize_magnetic_factorytest(struct ssp_data *data)
 {
